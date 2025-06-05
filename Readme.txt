@@ -17,17 +17,23 @@ This Excel file contains the configuration for radial collector well laterals, i
 
 Within each sheet, the laterals (screened horizontal pipes) are defined row by row. Each lateral is specified using the following fields:
 
-layerX, rowX, colX: Grid cell location number where the lateral X is located
-lengthX: Length of the lateral segment in that cell (in meters)
+ layerX, rowX, colX: Grid cell location number where the lateral X is located
+ lengthX: Length of the lateral segment in that cell (in meters)
 
-The sheet also contains global parameters for the corresponding RCW, including:
-head: Target head (m) maintained inside the caisson (central shaft)
-row, col: Grid location of the caisson (all layers at this location are set as inactive)
-well_D: Diameter of the laterals (m)
-Skin_K: Hydraulic conductivity of the filter layer around each lateral (m/day)
-Skin_Thick: Thickness of the filter layer (m)
-pipe_open: Open area ratio of the pipe (dimensionless, 0–1)
-roughness: Relative roughness of the pipe (dimensionless)
-B_coefficient: Head loss coefficient representing convergence and frictional loss near the laterals
+ The sheet also contains global parameters for the corresponding RCW, including:
+ head: Target head (m) maintained inside the caisson (central shaft)
+ row, col: Grid location of the caisson (all layers at this location are set as inactive)
+ well_D: Diameter of the laterals (m)
+ Skin_K: Hydraulic conductivity of the filter layer around each lateral (m/day)
+ Skin_Thick: Thickness of the filter layer (m)
+ pipe_open: Open area ratio of the pipe (dimensionless, 0–1)
+ roughness: Relative roughness of the pipe (dimensionless)
+ B_coefficient: Head loss coefficient representing convergence and frictional loss near the laterals
 
 All values in this file are automatically parsed and used by Radial_Well.py to generate the final MODFLOW 6 drn package input.
+
+To run the simulation via main.py, the following requirements must be satisfied:
+The model workflow is executed through FloPy, which creates and runs MODFLOW 6 simulations within a designated working directory.
+The MODFLOW 6 executable (mf6.exe) must be located in the same working directory where the simulation is executed. FloPy calls this executable during the model run process.
+You can download the mf6.exe executable from the official USGS website:
+👉 https://water.usgs.gov/water-resources/software/MODFLOW-6/
