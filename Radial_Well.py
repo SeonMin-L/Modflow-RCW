@@ -119,11 +119,12 @@ class Radial_well_input:
                 for layer_i in range(idomain.shape[0]):
                     idomain[int(layer_i), int(cassion_row), int(cassion_col)] = 0
         
-        drn = self.gwf.get_package('drn_0')
-        drn_data = drn.stress_period_data.get_data(kper=0) 
         origin_drn=[]
-        for i in drn_data[0]:
-             origin_drn.append([i["cellid"][0],i["cellid"][1],i["cellid"][2],i["elev"],i["cond"]])
+        if "drn_0" in self.gwf.package_names:
+            drn = self.gwf.get_package('drn_0')
+            drn_data = drn.stress_period_data.get_data(kper=0) 
+            for i in drn_data[0]:
+                 origin_drn.append([i["cellid"][0],i["cellid"][1],i["cellid"][2],i["elev"],i["cond"]])
         
         initial_drn = origin_drn+initial_drn
         self.gwf.dis.idomain.set_data(idomain)
