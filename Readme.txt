@@ -9,7 +9,7 @@ This script generates the required MODFLOW 6 input files (e.g., dis, drn, riv, e
 3. main.py
 This is the main execution script that integrates both Gis_FloPy_nom.py and Radial_Well.py. It automates the entire process from model setup to the evaluation of RCW intake performance, making it a convenient entry point for running simulations.
 
-4. model_setting_gis.zip (or equivalent)
+4. model_setting_gis.zip
 This folder contains a set of shapefiles that define the spatial and conceptual settings of the model. It serves as the primary input to Gis_FloPy_nom.py
 
 5. pipe.xlsx
