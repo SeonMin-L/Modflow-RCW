@@ -41,21 +41,21 @@ def modflow6_build(Modflow_cell_path, sim_name, Modflow_work_file):
         
         if "riv" in Modflow_cell_load.columns:
             riv_data = True
-            riv_in = Modflow_cell_load[Modflow_cell_load["riv"].str.contains(",", na=False)]
+            riv_in = Modflow_cell_load[Modflow_cell_load["riv"].notnull()]
             riv_in = [[int(data["layer"]), int(data["row"]), int(data["col"]), float(data["riv"].split(",")[0]), 
                     float(data["riv"].split(",")[1]), float(data["riv"].split(",")[2])] for idx, data in riv_in.iterrows()]
             riv = riv+riv_in
             
         if "drn" in Modflow_cell_load.columns:
             riv_data = True
-            drn_in = Modflow_cell_load[Modflow_cell_load["riv"].str.contains(",", na=False)]
+            drn_in = Modflow_cell_load[Modflow_cell_load["drn"].notnull()]
             drn_in = [[int(data["layer"]), int(data["row"]), int(data["col"]), float(data["drn"].split(",")[0]), 
                     float(data["drn"].split(",")[1])] for idx, data in drn_in.iterrows()]
             drn = drn+drn_in
             
         if "chd" in Modflow_cell_load.columns:
             chd_data = True
-            chd_in = Modflow_cell_load[Modflow_cell_load["riv"].str.contains(",", na=False)]
+            chd_in = Modflow_cell_load[Modflow_cell_load["chd"].notnull()]
             chd_in = [[int(data["layer"]), int(data["row"]), int(data["col"]), float(data["chd"].split(",")[0])] for idx, data in chd_in.iterrows()]
             chd = chd+chd_in
     
