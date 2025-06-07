@@ -1,13 +1,7 @@
-import os
-import flopy.utils.binaryfile as bf
 import flopy
 import pandas as pd
 import math
-import numpy as np
 import sympy as sp
-import geopandas as gpd
-os.chdir(r"C:\Users\user\Desktop\모델 제작용 파이썬\Gis_FloPy")
-import Gis_FloPy_nom as gf
 
 non_linear=True
 convergence_loss = True
