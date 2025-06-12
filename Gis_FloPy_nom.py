@@ -12,10 +12,6 @@ def modflow6_build(Modflow_cell_path, sim_name, Modflow_work_file):
         nrow = int(lines[1].split(":")[1])
         ncol = int(lines[2].split(":")[1])
     
-    chd_data=False
-    riv_data=False
-    drn_data=False
-    
     kh = np.ones((nlay, nrow, ncol))
     kz = np.ones((nlay, nrow, ncol))
     Ss = np.ones((nlay, nrow, ncol))
@@ -26,12 +22,13 @@ def modflow6_build(Modflow_cell_path, sim_name, Modflow_work_file):
     riv = []
     drn = []
     chd = []
+    wel = []
     for layer in range(nlay):
         Modflow_cell_load = gpd.read_file(os.path.join(Modflow_cell_path, f"MD_IP_Layer_{layer}.shp"))
         if layer == 0:
             top = np.array(Modflow_cell_load["up_el"]).reshape(nrow,ncol)        
             if "rch" in Modflow_cell_load.columns:
-                rch = np.array(Modflow_cell_load["rch"]).reshape(nrow,ncol)
+                rch = np.array(Modflow_cell_load["rch"]).reshape(nrow,ncol) / 1000 / 365
         kh[layer] = np.array(Modflow_cell_load["kh"]).reshape(nrow,ncol)
         kz[layer] = np.array(Modflow_cell_load["kv"]).reshape(nrow,ncol)
         Ss[layer] = np.array(Modflow_cell_load["ss"]).reshape(nrow,ncol)
@@ -40,24 +37,30 @@ def modflow6_build(Modflow_cell_path, sim_name, Modflow_work_file):
         botm[layer] = np.array(Modflow_cell_load["dn_el"]).reshape(nrow,ncol)
         
         if "riv" in Modflow_cell_load.columns:
-            riv_data = True
-            riv_in = Modflow_cell_load[Modflow_cell_load["riv"].notnull()]
+            riv_in = Modflow_cell_load[Modflow_cell_load["riv"].notnull() & (Modflow_cell_load["riv"].astype(str).str.strip() != "") & 
+                     (Modflow_cell_load["riv"].astype(str).str.lower() != "nan")]
             riv_in = [[int(data["layer"]), int(data["row"]), int(data["col"]), float(data["riv"].split(",")[0]), 
                     float(data["riv"].split(",")[1]), float(data["riv"].split(",")[2])] for idx, data in riv_in.iterrows()]
             riv = riv+riv_in
             
         if "drn" in Modflow_cell_load.columns:
-            riv_data = True
-            drn_in = Modflow_cell_load[Modflow_cell_load["drn"].notnull()]
+            drn_in = Modflow_cell_load[Modflow_cell_load["drn"].notnull() & (Modflow_cell_load["drn"].astype(str).str.strip() != "") & 
+                     (Modflow_cell_load["drn"].astype(str).str.lower() != "nan")]
             drn_in = [[int(data["layer"]), int(data["row"]), int(data["col"]), float(data["drn"].split(",")[0]), 
                     float(data["drn"].split(",")[1])] for idx, data in drn_in.iterrows()]
             drn = drn+drn_in
             
         if "chd" in Modflow_cell_load.columns:
-            chd_data = True
-            chd_in = Modflow_cell_load[Modflow_cell_load["chd"].notnull()]
+            chd_in = Modflow_cell_load[Modflow_cell_load["chd"].notnull() & (Modflow_cell_load["chd"].astype(str).str.strip() != "") & 
+                     (Modflow_cell_load["chd"].astype(str).str.lower() != "nan")]
             chd_in = [[int(data["layer"]), int(data["row"]), int(data["col"]), float(data["chd"].split(",")[0])] for idx, data in chd_in.iterrows()]
             chd = chd+chd_in
+            
+        if "wel" in Modflow_cell_load.columns:
+            wel_in = Modflow_cell_load[Modflow_cell_load["wel"].notnull() & (Modflow_cell_load["wel"].astype(str).str.strip() != "") & 
+                     (Modflow_cell_load["wel"].astype(str).str.lower() != "nan")]
+            wel_in = [[int(data["layer"]), int(data["row"]), int(data["col"]), float(data["wel"].split(",")[0])] for idx, data in wel_in.iterrows()]
+            wel = wel+wel_in
     
     row_array = Modflow_cell_load[(Modflow_cell_load["row"]==0)]["geometry"].bounds
     delc = np.array(row_array["maxx"]-row_array["minx"])
@@ -70,7 +73,7 @@ def modflow6_build(Modflow_cell_path, sim_name, Modflow_work_file):
     gwf = flopy.mf6.ModflowGwf(sim, modelname=sim_name, save_flows=True)
     flopy.mf6.ModflowGwfdis(gwf, nlay=nlay, nrow=nrow, ncol=ncol, delr=delr, delc=delc,top=top, botm=botm, idomain=InActive)
     
-    strt = np.repeat(top, nlay, axis=0)
+    strt = np.repeat(top[np.newaxis, :, :], nlay, axis=0)
     flopy.mf6.ModflowGwfic(gwf, strt=strt)
     
     flopy.mf6.ModflowGwfnpf(gwf, save_flows=True, icelltype=1, k=kh, k33=kz)
@@ -78,15 +81,18 @@ def modflow6_build(Modflow_cell_path, sim_name, Modflow_work_file):
     
     flopy.mf6.ModflowGwfrcha(gwf, recharge={0 :rch})
     
-    if chd_data == True:
+    if len(chd) > 0:
         chd_spd = {0:chd}
         flopy.mf6.ModflowGwfchd(gwf, stress_period_data=chd_spd)
-    if riv_data == True:
+    if len(riv) > 0:
         riv_spd = {0:riv}
         flopy.mf6.ModflowGwfriv(gwf, stress_period_data=riv_spd)
-    if drn_data == True:
+    if len(drn) > 0:
         drn_spd = {0:drn}
         flopy.mf6.ModflowGwfdrn(gwf, stress_period_data=drn_spd)
+    if len(wel) > 0:
+        wel_spd = {0: wel}
+        flopy.mf6.ModflowGwfwel(gwf, stress_period_data=wel_spd)
     
     flopy.mf6.ModflowIms(
         sim,
@@ -105,6 +111,6 @@ def modflow6_build(Modflow_cell_path, sim_name, Modflow_work_file):
                                 saverecord=[("HEAD", "ALL"), ("BUDGET", "ALL")],printrecord=[("HEAD", "LAST"), ("BUDGET", "LAST")])
     
     sim.write_simulation(silent=True)
-    success, buff = sim.run_simulation(silent=True)
+    #success, buff = sim.run_simulation(silent=True)
     
     return sim
