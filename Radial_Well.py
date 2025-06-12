@@ -388,7 +388,14 @@ def run(sim, pipe_excel, sim_name, alpha=alpha, iterative_version=0):
             if Q_max_ratio < convergence_end_ratio and repeat >=5: 
                 break            
             
+    RCW_out={}
+    for caisson, data in Cassion_input_data.items():
+        Q_out = 0
+        for idx, lateral in data[1].items():
+            Q = lateral.loc[0,"Q_pipe"]
+            Q_out += Q
+        RCW_out[caisson] = Q_out
             
-    return iterative_data, Cassion_input_data, sim
+    return iterative_data, Cassion_input_data, sim, RCW_out
         
         
