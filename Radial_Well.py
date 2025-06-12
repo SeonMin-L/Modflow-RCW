@@ -3,6 +3,7 @@ import pandas as pd
 import math
 import sympy as sp
 
+
 non_linear=True
 convergence_loss = True
 slot_loss=True
@@ -138,15 +139,15 @@ def output_read(Cassion_input_data, repeat, gwf):
         layer = node//(nrow*ncol)
         remain_cell = node % (nrow*ncol)
         row = remain_cell//ncol
-        col = remain_cell % ncol-1
+        col = remain_cell % ncol
         return layer, row, col
     
     cbc = flopy.utils.CellBudgetFile(f"{gwf.model_ws}/{gwf.name}.cbc")
     drain_leakage = cbc.get_data(text="DRN")
     Drn_out_df = pd.DataFrame({
-        'layer': [node_equation(node, nlay, nrow, ncol)[0] for node in drain_leakage[0]["node"]],
-        'row': [node_equation(node, nlay, nrow, ncol)[1] for node in drain_leakage[0]["node"]],
-        'col': [node_equation(node, nlay, nrow, ncol)[2] for node in drain_leakage[0]["node"]],
+        'layer': [node_equation(node-1, nlay, nrow, ncol)[0] for node in drain_leakage[0]["node"]],
+        'row': [node_equation(node-1, nlay, nrow, ncol)[1] for node in drain_leakage[0]["node"]],
+        'col': [node_equation(node-1, nlay, nrow, ncol)[2] for node in drain_leakage[0]["node"]],
         'leakage': drain_leakage[0]["q"]})
     
     for cassion_key, cassion_data in Cassion_input_data.items():
