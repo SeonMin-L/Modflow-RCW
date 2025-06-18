@@ -27,8 +27,8 @@ Within each sheet, the laterals (screened horizontal pipes) are defined row by r
  Skin_K: Hydraulic conductivity of the filter layer around each lateral (m/day)
  Skin_Thick: Thickness of the filter layer (m)
  pipe_open: Open area ratio of the pipe (dimensionless, 0–1)
- roughness: Relative roughness of the pipe (dimensionless)
- B_coefficient: Head loss coefficient representing convergence and frictional loss near the laterals
+ roughness: Relative roughness of the pipe (mm)
+ B_coefficient: Head loss coefficient representing convergence and frictional loss near the laterals (mm)
 
 All values in this file are automatically parsed and used by Radial_Well.py to generate the final MODFLOW 6 drn package input.
 
