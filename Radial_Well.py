@@ -197,14 +197,14 @@ class Horizontal_calculate:
                     f1=(1/(-2 * math.log10(e/3.7065 - (5.0272/Re) * math.log10(e/3.827 - 
                        (4.567/Re)*math.log10((e/7.7918)**0.9924 + (5.3326/(208.5 + Re))**0.9345)))))**2
                     f1 = f1*(1-0.0153*WRe**0.3978)
-                elif Re <= 2000:
+                elif Re <= 2300:
                     f1 = 64/Re*(1+0.04304*WRe**0.6142)
                 else:
                     x2=(1/(-2 * math.log10(e/3.7065 - (5.0272/3000) * math.log10(e/3.827 - 
                        (4.567/3000)*math.log10((e/7.7918)**0.9924 + (5.3326/(208.5 + 3000))**0.9345)))))**2
                     x2 = x2*(1-0.0153*WRe**0.3978)
-                    x1=64/2000*(1+0.04304*WRe**0.6142)
-                    f1=(x2-x1)/(3000-2000)*(Re-2000)+x1
+                    x1=64/2300*(1+0.04304*WRe**0.6142)
+                    f1=(x2-x1)/(3000-2300)*(Re-2300)+x1
                 return f1
         
         def head_loss(IQ, SQ, f2, f1, L, D):
@@ -399,3 +399,4 @@ def run(sim, pipe_excel, sim_name, alpha=alpha, iterative_version=0):
     return iterative_data, Cassion_input_data, sim, RCW_out
         
         
+
