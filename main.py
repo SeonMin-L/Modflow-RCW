@@ -10,5 +10,6 @@ sim_name = "Test" # Input modflow name
 
 sim = gf.modflow6_build(model_setting_gis, sim_name, Modflow_work_file)
 pipe_excel= "" # Input pipe xlsx file path
-iterative_data, Cassion_input_data, sim = RW.run(sim, pipe_excel, sim_name)
+iterative_data, Cassion_input_data, sim, RCW_out = RW.run(sim, pipe_excel, sim_name)
+
 
