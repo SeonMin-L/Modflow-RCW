@@ -6,11 +6,8 @@ This script implements the physical characteristics of a radial collector well. 
 2. main.py
 This is the main execution script that integrates both Gis_FloPy_nom.py and Radial_Well.py. It automates the entire process from model setup to the evaluation of RCW intake performance, making it a convenient entry point for running simulations.
 
-3. model_setting_gis.zip
-This folder contains a set of shapefiles that define the spatial and conceptual settings of the model. It serves as the primary input to Gis_FloPy_nom.py
-
-4. pipe.xlsx
-This Excel file contains the configuration for radial collector well laterals, including their spatial placement and hydraulic properties. Each sheet within the file corresponds to a single RCW (radial collector well). To simulate multiple RCWs, add additional sheets—one for each well.
+3. Input datas.zip
+This folder consists of standard MODFLOW package files (e.g., .dis) compatible with FloPy, and an Excel file containing lateral pipe data. These files are utilized as the primary inputs by configuring their directory paths within main.py
 
 Within each sheet, the laterals (screened horizontal pipes) are defined row by row. Each lateral is specified using the following fields:
 
