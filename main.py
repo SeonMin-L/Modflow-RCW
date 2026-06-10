@@ -1,5 +1,5 @@
 import sys
-rw_path = ""  # Input file paths for Radial_Well.py and Gis_FloPy_nom.py have been set
+rw_path = ""  # Input file paths for Radial_Well.py have been set
 sys.path.append(rw_path)
 import flopy
 import Radial_Well as RW
