@@ -1,11 +1,12 @@
 import flopy
 import pandas as pd
 import math
-import sympy as sp
-
+import numpy as np
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 non_linear=True
-convergence_loss = True
+convergence_loss=True
 slot_loss=True
 friction_loss= True
 momemtom_loss= True
@@ -17,9 +18,12 @@ u=1.0020 * 10**(-3)   #Ns/m2 = kg/m*s
 p=1000   #kg/m
 C=0.135
 g=9.8*86400**2 #[m/d^2]
-alpha=0.25
+caisson_c = 1
 convergence_end = 1
-convergence_end_ratio = 0.03
+convergence_end_ratio = 0.01
+cdh_end=0.05
+iter_max = 100
+
 
 # ✅ 필요 함수----------------------------------------------------------------------------------------------------
 class Radial_well_input:
@@ -35,6 +39,7 @@ class Radial_well_input:
                 input_CS["col"] = Cassion_execl.loc[2,"cassion"]
                 input_CS["well_D"] = Cassion_execl.loc[3,"cassion"]
                 input_CS["Skin_K"] = Cassion_execl.loc[4,"cassion"]
+                input_CS["Skin_B"] = 0.5*(input_CS["Skin_K"]*100/86400)**(-3/4)*(100/86400)**2  #[day^2/m^2]
                 input_CS["skin_Thick"] = Cassion_execl.loc[5,"cassion"]
                 input_CS["pipe_open"] = Cassion_execl.loc[6,"cassion"]
                 input_CS["ab_roughness"] = (Cassion_execl.loc[7,"cassion"]*10**(-3))/Cassion_execl.loc[3,"cassion"]
@@ -55,9 +60,12 @@ class Radial_well_input:
         self.sim = sim
         self.Cassion_input_data = Cassion_input_data
         self.npf = gwf.get_package("npf")
-        self.dis = gwf.get_package("dis")          
+        self.dis = gwf.get_package("dis")
+        success, buff = sim.run_simulation(silent=True)
+        headfile = flopy.utils.HeadFile(f"{gwf.model_ws}/{gwf.name}.hds")
+        self.aqu_head = headfile.get_data(totim=1.0)
     
-    def initial_drn_input(self):
+    def initial_drn_input(self, trn_hmd):
         idomain = self.dis.idomain.array
         initial_drn = []
         for Cassion in self.Cassion_input_data.keys():
@@ -77,6 +85,10 @@ class Radial_well_input:
                     layer = int(cell["layer"] )
                     row = int(cell["row"])
                     col = int(cell["col"])
+                    if trn_hmd:
+                        head = (self.dis.top.array[row,col] + cassion_head)/2
+                    else:
+                        head = cassion_head
                 
                     Kx = self.npf.k.array[layer, row, col]
                     Kz = self.npf.k33.array[layer, row, col]
@@ -90,24 +102,21 @@ class Radial_well_input:
                     re=0.28*math.sqrt((dx**2)*math.sqrt((Kz)/(Kx))+(dz**2)*math.sqrt((Kx)/(Kz)))/((Kz/Kx)**(1/4)+((Kx/Kz)**(1/4)))
                     self.Cassion_input_data[Cassion][1][key].loc[idx,"re"] = re
                     Ka = self.Cassion_input_data[Cassion][1][key].loc[idx,"K_gm"] = math.sqrt(Kx*Kz)
-                    
-                    if sk_thick==0:
-                        rs=rw
-                        Ks=Ka
-                    
+                    self.Cassion_input_data[Cassion][1][key].loc[idx,"B_gm"] = 0.5*(Ka*100/86400)**(-3/4)*(100/86400)**2  #[day^2/m^2]
+                    Ks=Ka if sk_thick==0 else Ks
                     pipe_L = self.Cassion_input_data[Cassion][1][key].loc[idx,"length"]
-                    self.Cassion_input_data[Cassion][1][key].loc[idx,"S_aq"] = S_aq =(1/(Ka)) * math.log(re/rs)
-                    self.Cassion_input_data[Cassion][1][key].loc[idx,"S_sk"] = S_sk=(1/(Ks)) * math.log(rs/rw)
-                    self.Cassion_input_data[Cassion][1][key].loc[idx,"S_cv"] = S_cv=(B/(rw*Ks*φ))
+                    CF = (1 / (2 * math.pi * pipe_L))
                     
-                    if convergence_loss == True:               
-                        Fe=(1/(2*math.pi*pipe_L))*(S_aq+S_sk+S_cv)
-                    else:
-                        Fe=(1/(2*math.pi*pipe_L))*(S_aq+S_sk)
-                        
+                    self.Cassion_input_data[Cassion][1][key].loc[idx,"S_aq"] = S_aq = CF * (1/(Ka)) * math.log(re/rs)
+                    self.Cassion_input_data[Cassion][1][key].loc[idx,"S_sk"] = S_sk = CF * (1/(Ks)) * math.log(rs/rw)
+                    self.Cassion_input_data[Cassion][1][key].loc[idx,"S_cv"] = S_cv = CF * (B/(rw*Ks*φ))
+                    self.Cassion_input_data[Cassion][1][key].loc[idx,"D_bt"] = (top+botm)/2
+                    self.Cassion_input_data[Cassion][1][key].loc[idx,"H"]    = head
+                    
+                    Fe = (S_aq+S_sk+S_cv) if convergence_loss == True else (S_aq+S_sk)
                     self.Cassion_input_data[Cassion][1][key].loc[idx,"linear_CWC"] = linear_CWC = 1/Fe
-                    
-                    drn_input = (layer, row, col, cassion_head, linear_CWC)
+
+                    drn_input = (layer, row, col, head, linear_CWC)
                     initial_drn.append(drn_input)
             
             if caisson_inactive == True:
@@ -116,10 +125,13 @@ class Radial_well_input:
         
         origin_drn=[]
         if "drn_0" in self.gwf.package_names:
+            initial_drn_key = [(value[0], value[1], value[2]) for value in initial_drn]
             drn = self.gwf.get_package('drn_0')
-            drn_data = drn.stress_period_data.get_data(kper=0) 
+            drn_data = drn.stress_period_data.data.get_data(0)
             for i in drn_data[0]:
-                 origin_drn.append([i["cellid"][0],i["cellid"][1],i["cellid"][2],i["elev"],i["cond"]])
+                key = (i["cellid"][0],i["cellid"][1],i["cellid"][2])
+                if key not in initial_drn_key:
+                    origin_drn.append([i["cellid"][0],i["cellid"][1],i["cellid"][2],i["elev"],i["cond"]])
         
         initial_drn = origin_drn+initial_drn
         self.gwf.dis.idomain.set_data(idomain)
@@ -142,7 +154,7 @@ def output_read(Cassion_input_data, repeat, gwf):
         col = remain_cell % ncol
         return layer, row, col
     
-    cbc = flopy.utils.CellBudgetFile(f"{gwf.model_ws}/{gwf.name}.cbc")
+    cbc = flopy.utils.CellBudgetFile(f"{gwf.model_ws}/{gwf.name}.cbc", precision="double")
     drain_leakage = cbc.get_data(text="DRN")
     Drn_out_df = pd.DataFrame({
         'layer': [node_equation(node-1, nlay, nrow, ncol)[0] for node in drain_leakage[0]["node"]],
@@ -168,7 +180,7 @@ def output_read(Cassion_input_data, repeat, gwf):
                     Q_in_max = max(Q_in_max, Q_change)
                 Cassion_input_data[cassion_key][1][pipe_key].loc[idx, "Q_in"] = leakage_value*-1
                 Cassion_input_data[cassion_key][1][pipe_key].loc[idx, "Q_pipe"] = Q_sum
-                
+    
     headfile = flopy.utils.HeadFile(f"{gwf.model_ws}/{gwf.name}.hds")
     aqu_head = headfile.get_data(totim=1.0)
     
@@ -178,6 +190,7 @@ class Horizontal_calculate:
     def __init__(self, Cassion_data, aqu_head):
         self.head = Cassion_data[0]["head"]
         self.Skin_K = Cassion_data[0]["Skin_K"]
+        self.Skin_B = Cassion_data[0]["Skin_B"]
         self.rw = Cassion_data[0]["well_D"]/2
         self.rs = Cassion_data[0]["rs"]
         self.ab_roughness = Cassion_data[0]["ab_roughness"]
@@ -186,136 +199,97 @@ class Horizontal_calculate:
         self.pipe_open = Cassion_data[0]["pipe_open"]
         self.aqu_head = aqu_head
         
-    def Q_pipe(self):
-        def f_calculation(e,pV,D,iq,p):     # Colebrook-White equation
+    def pipe(self, top, alpha):
+        def f_calculation(e, pV, D, iq, p, ReT=3000, ReL=2300):     # Colebrook-White equation
+            pV = np.asarray(pV, dtype=float)
+            iq = np.asarray(iq, dtype=float)
             Re=p*pV*D/u                          # [kg/m^3]*[m/s]*[m]/[kg/m*s] = []
             WRe = p*iq/(math.pi*u)               # [kg/m^3]*[m*2/s]/[kg/m*s] = []
-            if pV == 0:
-                return 0
-            else:
-                if Re >= 3000:
-                    f1=(1/(-2 * math.log10(e/3.7065 - (5.0272/Re) * math.log10(e/3.827 - 
-                       (4.567/Re)*math.log10((e/7.7918)**0.9924 + (5.3326/(208.5 + Re))**0.9345)))))**2
-                    f1 = f1*(1-0.0153*WRe**0.3978)
-                elif Re <= 2300:
-                    f1 = 64/Re*(1+0.04304*WRe**0.6142)
-                else:
-                    x2=(1/(-2 * math.log10(e/3.7065 - (5.0272/3000) * math.log10(e/3.827 - 
-                       (4.567/3000)*math.log10((e/7.7918)**0.9924 + (5.3326/(208.5 + 3000))**0.9345)))))**2
-                    x2 = x2*(1-0.0153*WRe**0.3978)
-                    x1=64/2300*(1+0.04304*WRe**0.6142)
-                    f1=(x2-x1)/(3000-2300)*(Re-2300)+x1
-                return f1
-        
-        def head_loss(IQ, SQ, f2, f1, L, D):
-            x = sp.symbols('x')
-            f_equation = ((f2 - f1) / L) * x + f1
-            Q_equation = (IQ / L) * x + SQ
-            Q2_result = sp.integrate(f_equation*Q_equation**2, (x,0,L))
-
-            if friction_loss==True:
-                Cf = 8 / (sp.pi ** 2 * g * D ** 5)  
-                dhf = (Cf * Q2_result).evalf()
-            else:
-                dhf=0
-
-            if momemtom_loss==True:
-                Cm = 8 / (sp.pi ** 2 * g * D ** 4)
-                dhm = (Cm * (IQ**2+2*IQ*SQ)).evalf()
-            else:
-                dhm=0
+            f = np.zeros_like(pV, dtype=float)
+            nz = (pV != 0) & np.isfinite(Re) & np.isfinite(WRe)
             
-            return dhf, dhm
+            m_turb = nz & (Re >= ReT)
+            m_lam  = nz & (Re <= ReL)
+            m_mid  = nz & (~m_turb) & (~m_lam)  # ReL < Re < ReT
+            
+            def f_lam(Re, WRe):
+                return 64/Re*(1+0.04304*WRe**0.6142)
                 
-        for pipe_key, pipe_data in self.pipe_data_all.items():
-            cell_count = pipe_data.shape[0]
-            for idx, cell in pipe_data.iloc[::-1].iterrows():
-                Q_pipe = self.pipe_data_all[pipe_key].loc[idx,"Q_pipe"]
-                L = self.pipe_data_all[pipe_key].loc[idx,"length"]
-                
-                Q_inflow = (self.pipe_data_all[pipe_key].loc[idx,"Q_in"]/L)/86400  #m2/sec
-                V_pipe = (self.pipe_data_all[pipe_key].loc[idx,"Q_pipe"] / (math.pi * self.rw ** 2)) / 86400 #([m^3/d]/[m^2])*(d/s)=m/s
-                f = f_calculation(self.ab_roughness, V_pipe, self.rw*2, Q_inflow, p)
-                
-                self.pipe_data_all[pipe_key].loc[idx,"f"] = f2 = f
-                
-                IQ = self.pipe_data_all[pipe_key].loc[idx,"Q_in"]
-                if idx == cell_count-1:
-                    f1 = 0
-                    SQ = 0
-                else:
-                    f1 = self.pipe_data_all[pipe_key].loc[idx+1,"f"]
-                    SQ = self.pipe_data_all[pipe_key].loc[idx+1,"Q_pipe"]
-                    
-                dhf, dhm = head_loss(IQ, SQ, f2, f1, L, self.rw*2)
-                self.pipe_data_all[pipe_key].loc[idx,"Head_loss_F"] = dhf
-                self.pipe_data_all[pipe_key].loc[idx,"Head_loss_M"] = dhm
-    
-    def Pipe_head_distribute(self):
-        for pipe_key, pipe_data in self.pipe_data_all.items():
-            V_at_Cassion = (pipe_data.loc[0,"Q_pipe"] /(math.pi * self.rw ** 2))
-            Cassion_inflow_head_loss = (V_at_Cassion**2)/(2*g)
-            for idx, cell in pipe_data.iterrows():
-                row = int(cell["row"])
-                col = int(cell["col"])
-                layer = int(cell["layer"])
-                if idx == 0:
-                    if cassion_loss==True:
-                        start_head = self.head + Cassion_inflow_head_loss
-                    else:
-                        start_head = self.head
-                else:
-                    start_head = self.pipe_data_all[pipe_key].loc[idx-1,"Pipe_head_end"]
-                
-                dh = self.pipe_data_all[pipe_key].loc[idx,"Head_loss_F"] +self.pipe_data_all[pipe_key].loc[idx,"Head_loss_M"]
-                self.pipe_data_all[pipe_key].loc[idx,"Pipe_head_end"] = float(start_head + dh)
-                self.pipe_data_all[pipe_key].loc[idx,"Pipe_head_input"] = float(start_head + dh/2)
-                
-                if self.pipe_data_all[pipe_key].loc[idx,"Pipe_head_input"] > self.aqu_head [layer,row,col]:
-                    self.pipe_data_all[pipe_key].loc[idx,"Pipe_head_input"] = float(self.aqu_head [layer,row,col])
-                    self.pipe_data_all[pipe_key].loc[idx,"Pipe_head_end"] = float(self.aqu_head [layer,row,col])
-
-    def Pipe_Conductance(self):
-        def β_calculate(K):
-            K_cs = K*100/86400 #[cm/sec]
-            β = 0.5*(K_cs)**(-3/4)*(100/86400)**2  #[day^2/m^2]
-            return β
+            def f_turb(Re, WRe):
+                f1=(1/(-2 * np.log10(e/3.7065 - (5.0272/Re) * np.log10(e/3.827 - 
+                   (4.567/Re)*np.log10((e/7.7918)**0.9924 + (5.3326/(208.5 + Re))**0.9345)))))**2
+                return f1*(1-0.0153*WRe**0.3978)
+            
+            if np.any(m_turb):
+                f[m_turb] = f_turb(Re[m_turb], WRe[m_turb])
+            if np.any(m_lam):
+                f[m_lam] = f_lam(Re[m_lam], WRe[m_lam])    
+            if np.any(m_mid):
+                x2 = f_turb(np.full(np.count_nonzero(m_mid), ReT, dtype=float), WRe[m_mid])
+                x1 = f_lam (np.full(np.count_nonzero(m_mid), ReL, dtype=float), WRe[m_mid])
+                f[m_mid] = (x2 - x1) / (ReT - ReL) * (Re[m_mid] - ReL) + x1
+            
+            return f
         
+        def f_head_L(IQ, SQ, f2, f1, L, D):
+            f = 0.5 * (f1 + f2)
+            Q2_int = L * ( (IQ**2)/3.0 + IQ*SQ + SQ**2 )
+            Cf = 8.0 / (np.pi**2 * g * D**5)
+            dhf = Cf * f * Q2_int
+            return dhf
+        
+        def m_head_L(IQ, SQ, L, D):
+            Cm = 8.0 / (np.pi**2 * g * D**4)
+            dhm = Cm * (IQ**2 + 2*IQ*SQ)
+            return dhm
+    
+        def c_head_L(V, f1):
+            dhc = np.zeros_like(f1)
+            dhc[0] = V**2 / (2*9.8)
+            return dhc
+            
+        mod_input  = []
+        rel_input = []
         for pipe_key, pipe_data in self.pipe_data_all.items():
-            for idx, cell in pipe_data.iterrows():
-                K_a = cell["K_gm"]
-                β_a = β_calculate(K_a)
-                K_s = self.Skin_K
-                β_s = β_calculate(K_s)
-                rw = self.rw
-                rs = self.rs
-                re = cell["re"]
-                Q_inflow = cell["Q_in"]
-                Fe = 1/cell["linear_CWC"]
-                L = cell["length"]
+            L  = self.pipe_data_all[pipe_key]["length"].to_numpy()
+            pipe_data["Q_inp"]  = (pipe_data["Q_in"] / L)/86400  #m2/sec
+            pipe_data["V_pipe"] = (pipe_data["Q_pipe"] / (math.pi * self.rw ** 2))/86400              #([m^3/d]/[m^2])*(d/s)=m/s
+            pipe_data["f"]      = f_calculation(self.ab_roughness, pipe_data["V_pipe"], self.rw*2, pipe_data["Q_inp"], p)
+            
+            SQ = np.concatenate([pipe_data["Q_pipe"][1:].to_numpy(), [0.0]])
+            IQ = pipe_data["Q_in"].to_numpy()
+            f2 = pipe_data["f"].to_numpy()
+            f1 = np.concatenate([pipe_data["f"][1:].to_numpy(), [0.0]])
+            CF = (1 / (2 * math.pi * L)) ** 2
+            
+            pipe_data["F_Head_L"] = Fa    = 0 if not friction_loss else f_head_L(IQ, SQ, f2, f1, L, self.rw*2)
+            pipe_data["M_Head_L"] = Ma    = 0 if not momemtom_loss else m_head_L(IQ, SQ, L, self.rw*2)
+            pipe_data["C_Head_L"] = Ca    = 0 if not cassion_loss  else c_head_L(pipe_data.loc[0,"V_pipe"], f1)
+            pipe_data["S_aq_N"]   = NS_aq = 0 if not non_linear    else CF * pipe_data["B_gm"] * (1 / self.rs - 1 / pipe_data["re"]) * pipe_data["Q_in"]
+            pipe_data["S_sk_N"]   = NS_sk = 0 if not non_linear    else CF * self.Skin_B * (1 / self.rw - 1 / self.rs) * pipe_data["Q_in"]
+            pipe_data["S_sl_N"]   = NS_sl = 0 if not slot_loss     else CF * (1 / (2 * g)) * (1 / (self.rw * C * self.pipe_open)) ** 2 * pipe_data["Q_in"]
+
+            for i, __ in enumerate(Fa):
+                l, r, c = pipe_data.loc[i,"layer"], pipe_data.loc[i,"row"], pipe_data.loc[i,"col"]
+                ah, th  = self.aqu_head[l,r,c], top[r,c]
+                NH   = self.head + Ca[0] + (sum(Fa[0:i]) + sum(Ma[0:i])) + (Fa[i] + Ma[i])/2
+                OH   = pipe_data.loc[i,"H"]
+                CWC  = 1 / (1/pipe_data.loc[i,"linear_CWC"] + NS_aq[i] + NS_sk[i] + NS_sl[i])
                 
-                if self.skin_Thick==0:
-                    rs=self.rw
-                    
-                if non_linear==True:
-                    NS_aq = β_a * (1 / rs - 1 / re)
-                    NS_sk = β_s * (1 / rw - 1 / rs)
-                else:
-                    NS_aq = 0
-                    NS_sk = 0
-                    
-                if slot_loss == True:
-                    NS_sl = (1 / (2 * g)) * (1 / (rw * C * self.pipe_open)) ** 2
-                else:
-                    NS_sl = 0
-                    
-                common_factor = (1 / (2 * math.pi * L)) ** 2
-                Se = Q_inflow*common_factor*(NS_aq + NS_sk + NS_sl)
-                CWN=1/(Fe+Se)
-                self.pipe_data_all[pipe_key].loc[idx,"S_aq_N"] = Q_inflow*common_factor*NS_aq
-                self.pipe_data_all[pipe_key].loc[idx,"S_sk_N"] = Q_inflow*common_factor*NS_sk
-                self.pipe_data_all[pipe_key].loc[idx,"S_sl_N"] = Q_inflow*common_factor*NS_sl
-                self.pipe_data_all[pipe_key].loc[idx,"CWC"] =CWN
+                if np.isnan(NH) or NH > th:
+                    NH = th
+                aeff = alpha
+                UH = (1-aeff) * OH + aeff * NH
+                
+                pipe_data.loc[i, "H"]    = UH
+                pipe_data.loc[i, "CWC"]  = CWC
+                pipe_data.loc[i, "RH"]   = NH
+            
+            mod_input.extend([[int(i["layer"]), int(i["row"]), int(i["col"]), i["H"],  i["CWC"]] for __, i in pipe_data.iterrows()])
+            rel_input.extend([[int(i["layer"]), int(i["row"]), int(i["col"]), i["RH"], i["CWC"]] for __, i in pipe_data.iterrows()])
+            self.pipe_data_all[pipe_key] = pipe_data
+            
+        return self.pipe_data_all, mod_input, rel_input
 
 def iterative_data_save(Cassion_input_data, iterative_data, repeat):
     iterative_data[repeat] = {}
@@ -323,71 +297,86 @@ def iterative_data_save(Cassion_input_data, iterative_data, repeat):
         iterative_data[repeat][Cassion_key] = {}
         for pipe_key, pipe_df in Cassion_data[1].items():
             iterative_data[repeat][Cassion_key][pipe_key] = pipe_df.copy()
-            
     return iterative_data
         
+def model_run(sim, gwf, drn_input):
+    gwf.remove_package("drn_0")
+    flopy.mf6.ModflowGwfdrn(gwf, stress_period_data={0: drn_input}, save_flows=True)
+    sim.write_simulation(silent=True)
+    success, buff = sim.run_simulation(silent=True)
+    if not success:
+        print("MODFLOW did not terminate normally.")
         
 # ✅ 실행---------------------------------------------------------------------------------------------------------
-def run(sim, pipe_excel, sim_name, alpha=alpha, iterative_version=0):
+def run(sim, pipe_excel, sim_name, alpha=0.3, cdh_end=0.5, cdq_end1 = 0.1, cdq_end2=5, iter_max = 100, trn_hmd = True):
 
     gwf = sim.get_model(sim_name)
-    
     iterative_data = {}
-    repeat=0
-    old_drn_input_pd = 0
-    old_Q_in_max = 0
+    repeat = 0
 
     root = Radial_well_input(pipe_excel, gwf, sim)
-    gwf, origin_drn = root.initial_drn_input()
+    gwf, origin_drn = root.initial_drn_input(trn_hmd)
     success, buff = sim.run_simulation(silent=True)
     if not success:
         print("MODFLOW did not terminate normally.")
     Cassion_input_data, aqu_head, Q_in_max = output_read(root.Cassion_input_data, repeat, gwf)
     iterative_data = iterative_data_save(Cassion_input_data, iterative_data, repeat)
+    top = gwf.dis.top.array
     
-    while True:
-        old_Q_in_max = Q_in_max
+    while trn_hmd:
         repeat +=1
-        total_pipe_data = pd.DataFrame()
+        total_input = []
+        final_input = []
         for cassion_name, Cassion_data in Cassion_input_data.items():
             root = Horizontal_calculate(Cassion_data, aqu_head)
-            root.Q_pipe()
-            root.Pipe_head_distribute()
-            root.Pipe_Conductance()
-            Cassion_input_data[cassion_name][1] = root.pipe_data_all
-            for pipe_key, pipe_pd in Cassion_input_data[cassion_name][1].items():
-                total_pipe_data = pd.concat([total_pipe_data, pipe_pd], ignore_index=True)
-        
+            Cassion_input_data[cassion_name][1], mod_input, rel_input = root.pipe(top, alpha)
+            total_input.extend(mod_input)
+            final_input.extend(rel_input)
+            
         iterative_data = iterative_data_save(Cassion_input_data, iterative_data, repeat)
-        drn_input_pd = pd.DataFrame(total_pipe_data, columns=["layer", "row", "col", "Pipe_head_input", "CWC"])
-        if Damping_start==True and repeat >=2:
-            drn_input_pd["Pipe_head_input"] = (1-alpha)*old_drn_input_pd["Pipe_head_input"]+alpha*drn_input_pd["Pipe_head_input"]
-        rcw_input = list(drn_input_pd.itertuples(index=False, name=None))
-        
-        drn_input = origin_drn+rcw_input
-        gwf.remove_package("drn_0")
-        flopy.mf6.ModflowGwfdrn(gwf, stress_period_data={0: drn_input}, save_flows=True)
-        sim.write_simulation(silent=True)
-        success, buff = sim.run_simulation(silent=True)
-        if not success:
-            print("MODFLOW did not terminate normally.")
-        
-        old_drn_input_pd = drn_input_pd
+        drn_input = [[int(r[0]), int(r[1]), int(r[2]), *r[3:]] for r in (origin_drn + total_input)]
+        model_run(sim, gwf, drn_input)
         Cassion_input_data, aqu_head, Q_in_max = output_read(Cassion_input_data, repeat, gwf)
         
         if repeat == 1:
-            first_Q_in_max = Q_in_max
-            
-        if iterative_version==0:
-            print(Q_in_max)
-            if Q_in_max < convergence_end:
+            f_Q_in_max = Q_in_max
+            print(f"{repeat} {Q_in_max: .3f}")
+        elif repeat >= 2:
+            now_input = np.array(total_input)
+            rel_input = np.array(final_input)
+            dh = max(abs(now_input[:,3] - rel_input[:,3]))
+            dq = Q_in_max / f_Q_in_max
+            print(f"{repeat} {dq: .3f}, {dh : .3f}, {Q_in_max : .3f}")
+            if (cdh_end > dh and cdq_end1 > dq)  or (Q_in_max < cdq_end2):
+                drn_input = [[int(r[0]), int(r[1]), int(r[2]), *r[3:]] for r in (origin_drn + final_input)]
+                model_run(sim, gwf, drn_input)
+                Cassion_input_data, aqu_head, Q_in_max = output_read(Cassion_input_data, repeat+1, gwf)
                 break
-        else:
-            Q_max_ratio = Q_in_max/first_Q_in_max
-            print(first_Q_in_max, Q_in_max, Q_max_ratio*100)
-            if Q_max_ratio < convergence_end_ratio and repeat >=5: 
-                break            
-            
+            if repeat == iter_max:
+                drn_input = []
+                for cn, cdata in Cassion_input_data.items():
+                    for pn, pdata in cdata[1].items():
+                        H = np.zeros([pdata.shape[0],5])
+                        H[:,0] = pdata["layer"].to_numpy()
+                        H[:,1] = pdata["row"].to_numpy()
+                        H[:,2] = pdata["col"].to_numpy()
+                        for i in range(int(iter_max*0.9), iter_max):
+                            H[:,3] += iterative_data[i][cn][pn].loc[:,"H"].to_numpy()
+                            H[:,4] += iterative_data[i][cn][pn].loc[:,"CWC"].to_numpy()
+                        Cassion_input_data[cn][1][pn]["H"]   = H[:,3] = H[:,3] / (iter_max - int(iter_max*0.9))
+                        Cassion_input_data[cn][1][pn]["CWC"] = H[:,4] = H[:,4] / (iter_max - int(iter_max*0.9))
+                        pipe_input = [[int(r[0]), int(r[1]), int(r[2]), *r[3:]] for r in H]
+                        drn_input.extend(pipe_input)
+                drn_input.extend(origin_drn)
+                model_run(sim, gwf, drn_input)
+                Cassion_input_data, aqu_head, Q_in_max = output_read(Cassion_input_data, repeat+1, gwf)
+                break
+    
+    gwf.remove_package("drn_0")
+    if len(origin_drn) > 0:
+        flopy.mf6.ModflowGwfdrn(gwf, stress_period_data={0: origin_drn}, save_flows=True)
+    sim.write_simulation(silent=True)
+    
     RCW_out={}
     for caisson, data in Cassion_input_data.items():
         Q_out = 0
@@ -396,7 +385,6 @@ def run(sim, pipe_excel, sim_name, alpha=alpha, iterative_version=0):
             Q_out += Q
         RCW_out[caisson] = Q_out
             
-    return iterative_data, Cassion_input_data, sim, RCW_out
+    return iterative_data, Cassion_input_data, sim, RCW_out, aqu_head
         
         
-
