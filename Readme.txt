@@ -3,16 +3,13 @@ This repository provides a set of scripts for evaluating the intake performance 
 1. Radial_Well.py
 This script implements the physical characteristics of a radial collector well. It is imported and executed within the main workflow to calculate well performance.
 
-2. Gis_FloPy_nom.py
-This script generates the required MODFLOW 6 input files (e.g., dis, drn, riv, etc.) based on geospatial input data. All necessary inputs are derived from GIS shapefiles, which define the spatial configuration and boundary conditions of the model.
-
-3. main.py
+2. main.py
 This is the main execution script that integrates both Gis_FloPy_nom.py and Radial_Well.py. It automates the entire process from model setup to the evaluation of RCW intake performance, making it a convenient entry point for running simulations.
 
-4. model_setting_gis.zip
+3. model_setting_gis.zip
 This folder contains a set of shapefiles that define the spatial and conceptual settings of the model. It serves as the primary input to Gis_FloPy_nom.py
 
-5. pipe.xlsx
+4. pipe.xlsx
 This Excel file contains the configuration for radial collector well laterals, including their spatial placement and hydraulic properties. Each sheet within the file corresponds to a single RCW (radial collector well). To simulate multiple RCWs, add additional sheets—one for each well.
 
 Within each sheet, the laterals (screened horizontal pipes) are defined row by row. Each lateral is specified using the following fields:
